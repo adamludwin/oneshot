@@ -7,7 +7,8 @@ const router = Router();
 router.get('/', requireAuth, (req, res) => {
   res.json({
     openRouterApiKey: process.env.OPENROUTER_API_KEY || null,
-    analysisModel: 'google/gemini-3-flash-preview',
+    analysisModel: process.env.ANALYSIS_MODEL || 'google/gemini-3-flash-preview',
+    dashboardModel: process.env.DASHBOARD_MODEL || process.env.ANALYSIS_MODEL || 'google/gemini-3-flash-preview',
   });
 });
 

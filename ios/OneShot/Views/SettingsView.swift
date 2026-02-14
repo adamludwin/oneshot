@@ -4,6 +4,8 @@ struct SettingsView: View {
     @EnvironmentObject var auth: AuthService
     @State private var showSignOutConfirm = false
     @State private var showResetConfirm = false
+    @State private var isResetting = false
+    @State private var resetMessage: String?
 
     var body: some View {
         NavigationStack {
@@ -26,9 +28,10 @@ struct SettingsView: View {
 
                 // Data
                 Section("Data") {
-                    Button("Re-scan All Screenshots") {
+                    Button("Clear Dashboard and Re-scan") {
                         showResetConfirm = true
                     }
+                    .disabled(isResetting)
 
                     LabeledContent("Version", value: "0.1.0")
                 }
@@ -47,12 +50,36 @@ struct SettingsView: View {
                 }
             }
             .confirmationDialog("Re-scan all screenshots?", isPresented: $showResetConfirm, titleVisibility: .visible) {
-                Button("Re-scan Everything") {
-                    PhotoService.shared.resetSync()
+                Button("Clear and Re-scan Everything") {
+                    Task {
+                        await clearDashboardAndResetScan()
+                    }
                 }
             } message: {
-                Text("This will re-process all your screenshots on next refresh. Existing items won't be duplicated.")
+                Text("This clears current cards on the server, resets local screenshot sync, and rebuilds on next dashboard refresh.")
             }
+            .alert("Data Reset", isPresented: Binding(
+                get: { resetMessage != nil },
+                set: { if !$0 { resetMessage = nil } }
+            )) {
+                Button("OK") {}
+            } message: {
+                Text(resetMessage ?? "")
+            }
+        }
+    }
+
+    private func clearDashboardAndResetScan() async {
+        isResetting = true
+        defer { isResetting = false }
+
+        do {
+            struct OkResponse: Codable { let ok: Bool }
+            let _: OkResponse = try await APIService.shared.post(path: "/api/items/reset", body: [:])
+            PhotoService.shared.resetSync()
+            resetMessage = "Dashboard cleared. Go back to Dashboard and pull to refresh to rebuild from screenshots."
+        } catch {
+            resetMessage = "Reset failed: \(error.localizedDescription)"
         }
     }
 }

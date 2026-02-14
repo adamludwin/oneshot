@@ -15,7 +15,10 @@ struct Item: Codable, Identifiable, Hashable {
     let sourceHash: String?
     let rawText: String?
     let people: [String]?
+    let sourceHashes: [String]?
+    let occurrenceCount: Int?
     let dismissed: Bool?
+    let lastSeenAt: String?
     let createdAt: String?
 
     enum ItemType: String, Codable, CaseIterable {
@@ -37,8 +40,11 @@ struct Item: Codable, Identifiable, Hashable {
         case endTime = "end_time"
         case location, description, urgency, category
         case sourceHash = "source_hash"
+        case sourceHashes = "source_hashes"
+        case occurrenceCount = "occurrence_count"
         case rawText = "raw_text"
         case people, dismissed
+        case lastSeenAt = "last_seen_at"
         case createdAt = "created_at"
     }
 
@@ -78,10 +84,31 @@ struct ExtractedItem: Codable {
             sourceHash: sourceHash,
             rawText: rawText,
             people: people,
+            sourceHashes: sourceHash.isEmpty ? [] : [sourceHash],
+            occurrenceCount: 1,
             dismissed: false,
+            lastSeenAt: nil,
             createdAt: nil
         )
     }
+}
+
+struct DashboardAlert: Codable, Hashable {
+    let text: String
+    let urgency: String
+}
+
+struct DashboardSection: Codable, Hashable {
+    let title: String
+    let items: [Item]
+}
+
+struct DashboardResponse: Codable {
+    let summary: String
+    let alerts: [DashboardAlert]
+    let sections: [DashboardSection]
+    let itemCount: Int?
+    let updatedAt: String?
 }
 
 extension Item.ItemType {

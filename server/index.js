@@ -5,6 +5,7 @@ import { initDB } from './db.js';
 import authRoutes from './routes/authRoutes.js';
 import configRoutes from './routes/configRoutes.js';
 import itemRoutes from './routes/itemRoutes.js';
+import dashboardRoutes from './routes/dashboardRoutes.js';
 
 dotenv.config();
 
@@ -19,6 +20,7 @@ app.get('/health', (req, res) => res.json({ status: 'ok' }));
 app.use('/auth', authRoutes);
 app.use('/api/config', configRoutes);
 app.use('/api/items', itemRoutes);
+app.use('/api/dashboard', dashboardRoutes);
 
 // ─── Start ────────────────────────────────────────────────
 
@@ -39,7 +41,9 @@ async function start() {
     console.log(`    GET  /api/config`);
     console.log(`    GET  /api/items`);
     console.log(`    POST /api/items`);
+    console.log(`    POST /api/items/reset`);
     console.log(`    DELETE /api/items/:id\n`);
+    console.log(`    GET  /api/dashboard\n`);
   });
 }
 

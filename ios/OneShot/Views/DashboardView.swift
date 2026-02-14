@@ -9,6 +9,14 @@ struct DashboardView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
+                    if let summary = viewModel.summary, !summary.isEmpty {
+                        SummaryCard(text: summary, updatedAt: viewModel.updatedAt)
+                    }
+
+                    if !viewModel.alerts.isEmpty {
+                        AlertsView(alerts: viewModel.alerts)
+                    }
+
                     // Scan status
                     if viewModel.isScanning {
                         ScanProgressView(
@@ -30,40 +38,13 @@ struct DashboardView: View {
                         EmptyDashboardView()
                     }
 
-                    // High urgency section
-                    let highItems = viewModel.items.filter { $0.urgency == .high }
-                    if !highItems.isEmpty {
-                        SectionView(title: "NEEDS ATTENTION", items: highItems) { item in
+                    if viewModel.sections.isEmpty {
+                        SectionView(title: "ALL ITEMS", items: viewModel.items) { item in
                             viewModel.dismissItem(item)
                         }
                     }
-
-                    // Events & Deadlines
-                    let upcoming = viewModel.items.filter {
-                        $0.urgency != .high && ($0.type == .event || $0.type == .deadline)
-                    }
-                    if !upcoming.isEmpty {
-                        SectionView(title: "COMING UP", items: upcoming) { item in
-                            viewModel.dismissItem(item)
-                        }
-                    }
-
-                    // Actions / To-Dos
-                    let actions = viewModel.items.filter {
-                        $0.urgency != .high && $0.type == .action
-                    }
-                    if !actions.isEmpty {
-                        SectionView(title: "TO-DO", items: actions) { item in
-                            viewModel.dismissItem(item)
-                        }
-                    }
-
-                    // Info / FYI
-                    let info = viewModel.items.filter {
-                        $0.urgency != .high && $0.type == .info
-                    }
-                    if !info.isEmpty {
-                        SectionView(title: "KEY INFO", items: info) { item in
+                    ForEach(viewModel.sections, id: \.title) { section in
+                        SectionView(title: section.title.uppercased(), items: section.items) { item in
                             viewModel.dismissItem(item)
                         }
                     }
@@ -106,6 +87,10 @@ struct DashboardView: View {
 @MainActor
 class DashboardViewModel: ObservableObject {
     @Published var items: [Item] = []
+    @Published var sections: [DashboardSection] = []
+    @Published var summary: String?
+    @Published var alerts: [DashboardAlert] = []
+    @Published var updatedAt: String?
     @Published var isScanning = false
     @Published var scanPhase = "Starting..."
     @Published var scanProgress = 0
@@ -126,8 +111,7 @@ class DashboardViewModel: ObservableObject {
 
         // Load existing items from backend
         do {
-            let serverItems: [Item] = try await APIService.shared.get(path: "/api/items")
-            self.items = serverItems
+            try await refreshDashboard()
         } catch {
             // Silently fail on first load — might not have backend yet
             print("Failed to load items: \(error)")
@@ -227,8 +211,7 @@ class DashboardViewModel: ObservableObject {
 
             // 6. Reload all items
             do {
-                let serverItems: [Item] = try await APIService.shared.get(path: "/api/items")
-                self.items = serverItems
+                try await refreshDashboard()
             } catch {
                 // If backend is down, use local items
                 self.items.append(contentsOf: newItems)
@@ -245,9 +228,36 @@ class DashboardViewModel: ObservableObject {
     func dismissItem(_ item: Item) {
         guard let id = item.id else { return }
         items.removeAll { $0.id == id }
+        for idx in sections.indices {
+            sections[idx] = DashboardSection(
+                title: sections[idx].title,
+                items: sections[idx].items.filter { $0.id != id }
+            )
+        }
         Task {
             try? await APIService.shared.delete(path: "/api/items/\(id)")
         }
+    }
+
+    func resetAndRescan() async {
+        do {
+            struct OkResponse: Codable { let ok: Bool }
+            let _: OkResponse = try await APIService.shared.post(path: "/api/items/reset", body: [:])
+            PhotoService.shared.resetSync()
+            await scan()
+        } catch {
+            errorMessage = error.localizedDescription
+            showError = true
+        }
+    }
+
+    private func refreshDashboard() async throws {
+        let dashboard: DashboardResponse = try await APIService.shared.get(path: "/api/dashboard")
+        self.summary = dashboard.summary
+        self.alerts = dashboard.alerts
+        self.sections = dashboard.sections
+        self.updatedAt = dashboard.updatedAt
+        self.items = dashboard.sections.flatMap { $0.items }
     }
 }
 
@@ -273,6 +283,56 @@ struct ScanProgressView: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+}
+
+struct SummaryCard: View {
+    let text: String
+    let updatedAt: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+            if let updatedAt {
+                Text("Updated \(relative(updatedAt))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    private func relative(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: iso) else { return "recently" }
+        let interval = Date().timeIntervalSince(date)
+        if interval < 60 { return "just now" }
+        if interval < 3600 { return "\(Int(interval / 60))m ago" }
+        if interval < 86400 { return "\(Int(interval / 3600))h ago" }
+        return "\(Int(interval / 86400))d ago"
+    }
+}
+
+struct AlertsView: View {
+    let alerts: [DashboardAlert]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(alerts, id: \.self) { alert in
+                HStack(spacing: 10) {
+                    Image(systemName: alert.urgency == "high" ? "exclamationmark.triangle.fill" : "bell.fill")
+                    Text(alert.text)
+                        .font(.subheadline)
+                }
+                .foregroundStyle(alert.urgency == "high" ? .red : .orange)
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
     }
 }
 
