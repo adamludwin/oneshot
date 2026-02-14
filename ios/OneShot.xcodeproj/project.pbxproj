@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 77;
+	objectVersion = 63;
 	objects = {
 
 /* Begin PBXBuildFile section */
@@ -26,7 +26,7 @@
 		2054923A124A38456C758DA9 /* AnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisService.swift; sourceTree = "<group>"; };
 		2D819EA12B88C8B771C3F8D2 /* OneShot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OneShot.entitlements; sourceTree = "<group>"; };
 		3FAF809A3BDE7EEC35C4DDC8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		4CE418B6464DF37B30DBD810 /* OneShot.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = OneShot.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4CE418B6464DF37B30DBD810 /* OneShot.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OneShot.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		68E3C9A060DB9AAE8892A057 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6A5743F6BFE79789EEE072D8 /* CardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardView.swift; sourceTree = "<group>"; };
 		890FA58150DEDF12200C113C /* App.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
@@ -132,7 +132,6 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					90AC37292F1F961D863303DE = {
-						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -147,7 +146,6 @@
 			);
 			mainGroup = 0A6A4AFB9E43362325C622E7;
 			minimizedProjectReferenceProxies = 1;
-			preferredProjectObjectVersion = 77;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -196,7 +194,7 @@
 				CODE_SIGN_ENTITLEMENTS = OneShot/OneShot.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 969QNG6A7A;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = OneShot/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -204,7 +202,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.oneshot.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.oneshotios.app;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -218,7 +216,7 @@
 				CODE_SIGN_ENTITLEMENTS = OneShot/OneShot.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 969QNG6A7A;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = OneShot/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -226,7 +224,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.oneshot.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.oneshotios.app;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
