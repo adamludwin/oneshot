@@ -3,11 +3,10 @@ import Foundation
 class APIService {
     static let shared = APIService()
 
-    // TODO: Change this to your Railway URL once deployed
     #if DEBUG
-    private let baseURL = "http://localhost:3001"
+    private let baseURL = "https://oneshot-api-production-ca5c.up.railway.app"
     #else
-    private let baseURL = "https://your-app.railway.app"
+    private let baseURL = "https://oneshot-api-production-ca5c.up.railway.app"
     #endif
 
     private init() {}
