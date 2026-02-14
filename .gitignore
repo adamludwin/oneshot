@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# Environment
+.env
+
+# Build output
+dist/
+
+# Vite
+*.local
+
+# macOS
+.DS_Store
+
+# Xcode
+ios/OneShot.xcodeproj/xcuserdata/
+ios/OneShot.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcuserstate
+DerivedData/
+
+# Server cache
+server/analysis-cache.json
+
+# Screenshots (user data)
+screenshots/*
+!screenshots/.gitkeep
+
+# IDE
+.vscode/
+*.swp
