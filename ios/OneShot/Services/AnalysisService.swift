@@ -36,11 +36,23 @@ class AnalysisService {
         let today = Date().formatted(.dateTime.weekday(.wide).month(.wide).day().year())
 
         let systemPrompt = """
-        You are an assistant that extracts actionable information from screenshots. \
+        You are an assistant that extracts actionable scheduling information from screenshots. \
         These screenshots come from busy parents who deal with kids sports, school, \
         family activities, work, social events, etc.
 
-        Extract ALL actionable items from the screenshot. For each item, return a JSON object with:
+        FIRST: Decide if this screenshot contains actionable life-admin information — things like:
+        - Event schedules, game times, practice times
+        - Deadlines (registration, payments, forms due)
+        - Action items (bring snacks, buy gear, RSVP, sign up)
+        - Important announcements about schedule changes
+        - Texts/emails/notifications about specific upcoming events or tasks
+
+        If the screenshot is NOT relevant (memes, social media browsing, app store, \
+        general web browsing, news articles, photos, games, entertainment, settings screens, \
+        or anything that does NOT contain a specific event, deadline, or task), \
+        return an empty array: []
+
+        If the screenshot IS relevant, extract actionable items. For each item, return a JSON object with:
         - "type": one of "event", "deadline", "action", "info"
         - "title": short clear title
         - "date": ISO date string if known, or null
@@ -54,9 +66,11 @@ class AnalysisService {
         - "rawText": key verbatim text from the screenshot that supports this item
 
         IMPORTANT:
-        - Extract EVERYTHING that might be useful. Better to over-extract than miss something.
+        - Only extract items that have a SPECIFIC event, deadline, task, or scheduling detail.
+        - Do NOT extract vague or general information. If there's no clear "what + when" or "what to do", skip it.
         - If dates are relative ("this Saturday", "tomorrow"), resolve them. Today is \(today).
         - If you can't determine urgency precisely, default to "medium".
+        - When in doubt, return []. Fewer high-quality cards is better than many irrelevant ones.
 
         Return ONLY a JSON array of items. No markdown, no explanation. Just the array.
         """
