@@ -276,6 +276,7 @@ router.get('/', requireAuth, async (req, res) => {
         summary: 'No items yet. Screenshot important life updates and pull to refresh.',
         alerts: [],
         sections: [],
+        items: [],
         itemCount: 0,
       });
     }
@@ -290,6 +291,7 @@ router.get('/', requireAuth, async (req, res) => {
 
     res.json({
       ...dashboard,
+      items,
       itemCount: items.length,
       updatedAt: new Date().toISOString(),
     });

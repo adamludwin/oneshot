@@ -269,7 +269,11 @@ class DashboardViewModel: ObservableObject {
         self.alerts = dashboard.alerts
         self.sections = dashboard.sections
         self.updatedAt = dashboard.updatedAt
-        self.items = dashboard.sections.flatMap { $0.items }
+        if let rawItems = dashboard.items, !rawItems.isEmpty {
+            self.items = rawItems
+        } else {
+            self.items = dashboard.sections.flatMap { $0.items }
+        }
     }
 }
 

@@ -107,6 +107,7 @@ struct DashboardResponse: Codable {
     let summary: String
     let alerts: [DashboardAlert]
     let sections: [DashboardSection]
+    let items: [Item]?
     let itemCount: Int?
     let updatedAt: String?
 }
