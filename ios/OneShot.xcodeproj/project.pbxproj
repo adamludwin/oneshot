@@ -135,7 +135,7 @@
 				LastUpgradeCheck = 1430;
 				TargetAttributes = {
 					90AC37292F1F961D863303DE = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = Z6BXRTTG66;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -200,7 +200,7 @@
 				CODE_SIGN_ENTITLEMENTS = OneShot/OneShot.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = Z6BXRTTG66;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = OneShot/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -208,7 +208,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.oneshot.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.oneshotai.app;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -222,7 +222,7 @@
 				CODE_SIGN_ENTITLEMENTS = OneShot/OneShot.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = Z6BXRTTG66;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = OneShot/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -230,7 +230,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.oneshot.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.oneshotai.app;
 				SDKROOT = iphoneos;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				TARGETED_DEVICE_FAMILY = "1,2";
