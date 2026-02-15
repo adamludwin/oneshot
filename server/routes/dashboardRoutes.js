@@ -271,7 +271,8 @@ router.get('/', requireAuth, async (req, res) => {
     );
 
     const items = result.rows;
-    if (items.length === 0) {
+    const displayItems = items.filter((item) => !isPastEvent(item));
+    if (displayItems.length === 0) {
       return res.json({
         summary: 'No items yet. Screenshot important life updates and pull to refresh.',
         alerts: [],
@@ -283,16 +284,16 @@ router.get('/', requireAuth, async (req, res) => {
 
     let dashboard;
     try {
-      dashboard = await synthesizeDashboard(items);
+      dashboard = await synthesizeDashboard(displayItems);
     } catch (err) {
       console.warn('dashboard synthesis fallback:', err.message);
-      dashboard = fallbackDashboard(items);
+      dashboard = fallbackDashboard(displayItems);
     }
 
     res.json({
       ...dashboard,
-      items,
-      itemCount: items.length,
+      items: displayItems,
+      itemCount: displayItems.length,
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
