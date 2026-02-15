@@ -3,6 +3,7 @@ import SwiftUI
 struct CardView: View {
     let item: Item
     var onDismiss: (() -> Void)?
+    var onTap: (() -> Void)?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -59,6 +60,12 @@ struct CardView: View {
                     .textCase(.uppercase)
                     .foregroundStyle(.red)
             }
+
+            if hasSourceReferences {
+                Label("Tap to view source screenshot", systemImage: "photo")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,6 +84,13 @@ struct CardView: View {
             }
         }
         .contextMenu {
+            if let onTap = onTap {
+                Button {
+                    onTap()
+                } label: {
+                    Label("View Source", systemImage: "photo")
+                }
+            }
             if let onDismiss = onDismiss {
                 Button(role: .destructive) {
                     onDismiss()
@@ -84,6 +98,9 @@ struct CardView: View {
                     Label("Dismiss", systemImage: "xmark.circle")
                 }
             }
+        }
+        .onTapGesture {
+            onTap?()
         }
     }
 
@@ -120,5 +137,9 @@ struct CardView: View {
 
     private var urgencyBorderWidth: CGFloat {
         item.urgency == .low ? 0 : 1
+    }
+
+    private var hasSourceReferences: Bool {
+        !(item.sourceHashes ?? []).isEmpty || item.sourceHash != nil
     }
 }

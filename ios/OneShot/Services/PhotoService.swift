@@ -97,6 +97,48 @@ class PhotoService {
         // Use the local identifier as a stable, unique key
         return asset.localIdentifier
     }
+
+    /// Load source screenshot images by PhotoKit local identifiers.
+    func loadImages(for localIdentifiers: [String], targetSize: CGSize = CGSize(width: 1200, height: 1200)) async throws -> [UIImage] {
+        let status = authorizationStatus
+        guard status == .authorized || status == .limited else {
+            throw PhotoError.notAuthorized
+        }
+
+        let uniqueIds = Array(Set(localIdentifiers.filter { !$0.isEmpty }))
+        if uniqueIds.isEmpty { return [] }
+
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: uniqueIds, options: nil)
+        if fetchResult.count == 0 { return [] }
+
+        var images: [UIImage] = []
+        let manager = PHImageManager.default()
+        let options = PHImageRequestOptions()
+        options.isSynchronous = false
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
+
+        for i in 0..<fetchResult.count {
+            let asset = fetchResult.object(at: i)
+            let image = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UIImage, Error>) in
+                manager.requestImage(
+                    for: asset,
+                    targetSize: targetSize,
+                    contentMode: .aspectFit,
+                    options: options
+                ) { image, _ in
+                    if let image = image {
+                        continuation.resume(returning: image)
+                    } else {
+                        continuation.resume(throwing: PhotoError.failedToLoadImage)
+                    }
+                }
+            }
+            images.append(image)
+        }
+
+        return images
+    }
 }
 
 enum PhotoError: LocalizedError {

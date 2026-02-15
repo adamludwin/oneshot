@@ -16,12 +16,14 @@
 		BAB8F3D6DDAFF320CAD09F40 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = 890FA58150DEDF12200C113C /* App.swift */; };
 		C111071E39D6E7100E8FAF0C /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2B297A50EC2443A6EB7F32C /* User.swift */; };
 		DE893233A04D71805EAD7A30 /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200D9E7B71788B5B7C59D78E /* OnboardingView.swift */; };
+		E39F655BBB664D3C2A66CFA5 /* CardSourceDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B395AD119370D1FEB045801 /* CardSourceDetailView.swift */; };
 		EEFB03F4A4780FFDE82AC2A0 /* AnalysisService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2054923A124A38456C758DA9 /* AnalysisService.swift */; };
 		F28FCCCE80238797602156E4 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9CD0F1B641C1954C9E337EC7 /* SettingsView.swift */; };
 		FF3F3BDBDD3415907CD846A2 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B126A2A806260F9F314CD6B0 /* DashboardView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		1B395AD119370D1FEB045801 /* CardSourceDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CardSourceDetailView.swift; sourceTree = "<group>"; };
 		200D9E7B71788B5B7C59D78E /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		2054923A124A38456C758DA9 /* AnalysisService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisService.swift; sourceTree = "<group>"; };
 		2D819EA12B88C8B771C3F8D2 /* OneShot.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = OneShot.entitlements; sourceTree = "<group>"; };
@@ -62,6 +64,7 @@
 		6C90EAEF4E4243FC67DF4FCF /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				1B395AD119370D1FEB045801 /* CardSourceDetailView.swift */,
 				6A5743F6BFE79789EEE072D8 /* CardView.swift */,
 				B126A2A806260F9F314CD6B0 /* DashboardView.swift */,
 				200D9E7B71788B5B7C59D78E /* OnboardingView.swift */,
@@ -176,6 +179,7 @@
 				EEFB03F4A4780FFDE82AC2A0 /* AnalysisService.swift in Sources */,
 				BAB8F3D6DDAFF320CAD09F40 /* App.swift in Sources */,
 				43A5834B54FFB3191B9CA8DC /* AuthService.swift in Sources */,
+				E39F655BBB664D3C2A66CFA5 /* CardSourceDetailView.swift in Sources */,
 				A85BC97A7D4B368564ECE69A /* CardView.swift in Sources */,
 				FF3F3BDBDD3415907CD846A2 /* DashboardView.swift in Sources */,
 				47FD2B8EA4AEF1E6EA43C315 /* Item.swift in Sources */,

@@ -4,6 +4,7 @@ import Photos
 struct DashboardView: View {
     @EnvironmentObject var auth: AuthService
     @StateObject private var viewModel = DashboardViewModel()
+    @State private var selectedCardForSource: Item?
 
     var body: some View {
         NavigationStack {
@@ -39,14 +40,20 @@ struct DashboardView: View {
                     }
 
                     if viewModel.sections.isEmpty {
-                        SectionView(title: "ALL ITEMS", items: viewModel.items) { item in
-                            viewModel.dismissItem(item)
-                        }
+                        SectionView(
+                            title: "ALL ITEMS",
+                            items: viewModel.items,
+                            onDismiss: { item in viewModel.dismissItem(item) },
+                            onTapCard: { item in selectedCardForSource = item }
+                        )
                     }
                     ForEach(viewModel.sections, id: \.title) { section in
-                        SectionView(title: section.title.uppercased(), items: section.items) { item in
-                            viewModel.dismissItem(item)
-                        }
+                        SectionView(
+                            title: section.title.uppercased(),
+                            items: section.items,
+                            onDismiss: { item in viewModel.dismissItem(item) },
+                            onTapCard: { item in selectedCardForSource = item }
+                        )
                     }
                 }
                 .padding(.horizontal, 16)
@@ -77,6 +84,11 @@ struct DashboardView: View {
                 Button("OK") {}
             } message: {
                 Text(viewModel.errorMessage)
+            }
+            .sheet(item: $selectedCardForSource) { item in
+                NavigationStack {
+                    CardSourceDetailView(item: item)
+                }
             }
         }
     }
@@ -385,6 +397,7 @@ struct SectionView: View {
     let title: String
     let items: [Item]
     let onDismiss: (Item) -> Void
+    let onTapCard: (Item) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -394,7 +407,11 @@ struct SectionView: View {
                 .tracking(0.5)
 
             ForEach(items, id: \.stableId) { item in
-                CardView(item: item, onDismiss: { onDismiss(item) })
+                CardView(
+                    item: item,
+                    onDismiss: { onDismiss(item) },
+                    onTap: { onTapCard(item) }
+                )
             }
         }
     }
