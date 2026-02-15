@@ -54,6 +54,28 @@ function dedupeById(items) {
   });
 }
 
+function buildAlertsFromSections(sections, limit = 6) {
+  const alertItems = sections
+    .filter((s) => s.title.toLowerCase().includes('needs attention'))
+    .flatMap((s) => s.items)
+    .filter(Boolean);
+
+  const seen = new Set();
+  const alerts = [];
+  for (const item of alertItems) {
+    const key = item.id || `${item.title}|${item.date || ''}|${item.time || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const when = [item.date, item.time].filter(Boolean).join(' ');
+    alerts.push({
+      text: when ? `${item.title} (${when})` : item.title,
+      urgency: item.urgency === 'high' ? 'high' : 'medium',
+    });
+    if (alerts.length >= limit) break;
+  }
+  return alerts;
+}
+
 function normalizeDashboardSections(sections, allItems) {
   const normalized = [];
   const overdueDeadlines = allItems.filter(isOverdueDeadline);
@@ -104,14 +126,6 @@ function fallbackDashboard(items) {
     );
   });
 
-  const alerts = sorted
-    .filter((i) => i.urgency === 'high')
-    .slice(0, 5)
-    .map((i) => ({
-      text: i.title,
-      urgency: 'high',
-    }));
-
   const sections = [
     {
       title: 'Needs Attention',
@@ -134,6 +148,7 @@ function fallbackDashboard(items) {
     },
   ].filter((s) => s.items.length > 0);
   const normalizedSections = normalizeDashboardSections(sections, sorted);
+  const alerts = buildAlertsFromSections(normalizedSections, 5);
 
   const summary = alerts.length > 0
     ? `You have ${alerts.length} high-priority item${alerts.length > 1 ? 's' : ''} needing attention.`
@@ -228,10 +243,16 @@ Rules:
     .filter((s) => s.title && s.items.length > 0);
   const normalizedSections = normalizeDashboardSections(sections, items);
 
+  const modelAlerts = Array.isArray(parsed.alerts) ? parsed.alerts.slice(0, 6) : [];
+  const fallback = fallbackDashboard(items);
+  const deterministicAlerts = buildAlertsFromSections(normalizedSections, 6);
+
   return {
     summary: parsed.summary || fallbackDashboard(items).summary,
-    alerts: Array.isArray(parsed.alerts) ? parsed.alerts.slice(0, 6) : [],
-    sections: normalizedSections.length > 0 ? normalizedSections : fallbackDashboard(items).sections,
+    // Prefer deterministic alerts from normalized sections so stale past events
+    // cannot appear in top banners even if model text mentions them.
+    alerts: deterministicAlerts.length > 0 ? deterministicAlerts : modelAlerts,
+    sections: normalizedSections.length > 0 ? normalizedSections : fallback.sections,
   };
 }
 
