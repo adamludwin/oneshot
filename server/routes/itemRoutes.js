@@ -7,6 +7,7 @@ const router = Router();
 const URGENCY_ORDER = { low: 0, medium: 1, high: 2 };
 const DEDUPE_MODEL = 'anthropic/claude-opus-4.6';
 const DEDUPE_CONFIDENCE_THRESHOLD = 0.72;
+const LLM_INGEST_MODEL = 'anthropic/claude-opus-4.6';
 
 function normalizeText(value) {
   if (!value) return '';
@@ -123,9 +124,135 @@ function toCandidateForLLM(row) {
   };
 }
 
-async function resolveDuplicateWithLLM({ item, candidates }) {
+function mergeIncomingItems(groupItems) {
+  const base = { ...groupItems[0] };
+  const allSourceHashes = [...new Set(groupItems.flatMap((i) => {
+    if (Array.isArray(i.source_hashes)) return i.source_hashes.filter(Boolean);
+    return i.source_hash ? [i.source_hash] : [];
+  }))];
+
+  const longestDescription = [...groupItems]
+    .map((i) => i.description || '')
+    .sort((a, b) => b.length - a.length)[0] || null;
+
+  const mergedPeople = [...new Set(groupItems.flatMap((i) => Array.isArray(i.people) ? i.people : []).filter(Boolean))];
+  const urgencyRank = { low: 0, medium: 1, high: 2 };
+  const strongestUrgency = [...groupItems]
+    .map((i) => i.urgency || 'medium')
+    .sort((a, b) => urgencyRank[b] - urgencyRank[a])[0] || 'medium';
+
+  return {
+    ...base,
+    description: longestDescription || base.description || null,
+    people: mergedPeople,
+    urgency: strongestUrgency,
+    source_hash: allSourceHashes[0] || base.source_hash || null,
+    source_hashes: allSourceHashes,
+  };
+}
+
+async function callOpenRouterJSON({ model, systemPrompt, userPayload, maxTokens = 1000, temperature = 0 }) {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey || !Array.isArray(candidates) || candidates.length === 0) {
+  if (!apiKey) throw new Error('OPENROUTER_API_KEY missing');
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      temperature,
+      max_tokens: maxTokens,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: JSON.stringify(userPayload) },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`OpenRouter call failed (${response.status})`);
+  }
+
+  const data = await response.json();
+  let content = data?.choices?.[0]?.message?.content || '{}';
+  content = content.trim();
+  if (content.startsWith('```')) {
+    content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  }
+  return JSON.parse(content);
+}
+
+async function llmGroupIncomingItems(items) {
+  if (!items.length) return items;
+
+  const indexed = items.map((item, idx) => ({
+    idx,
+    type: item.type || 'info',
+    title: item.title || '',
+    date: item.date || null,
+    time: item.time || null,
+    location: item.location || null,
+    description: item.description || null,
+    category: item.category || 'other',
+    urgency: item.urgency || 'medium',
+    source_hash: item.source_hash || null,
+  }));
+
+  const result = await callOpenRouterJSON({
+    model: LLM_INGEST_MODEL,
+    maxTokens: 1200,
+    temperature: 0,
+    systemPrompt: `You are an ingestion dedupe planner for life-admin items.
+
+Given items extracted from one screenshot batch, identify which indices are the same real-world obligation.
+Examples of same:
+- Same event appearing in two calendar screenshots
+- Same deadline phrased slightly differently
+- Same to-do repeated in thread snapshots
+
+Return ONLY JSON:
+{
+  "groups": [
+    { "indices": [0, 2], "reason": "same event" }
+  ],
+  "dropIndices": [5]
+}
+
+Rules:
+- "groups" should only include true duplicates; if unsure, do not group.
+- indices in each group must be from input.
+- Use dropIndices for obvious garbage/non-actionable items only.
+- Do not invent indices.`,
+    userPayload: { items: indexed },
+  });
+
+  const grouped = new Set();
+  const output = [];
+  const safeGroups = Array.isArray(result.groups) ? result.groups : [];
+  const dropSet = new Set(Array.isArray(result.dropIndices) ? result.dropIndices : []);
+
+  for (const g of safeGroups) {
+    const idxs = [...new Set((g.indices || []).filter((i) => Number.isInteger(i) && i >= 0 && i < items.length))];
+    if (idxs.length < 2) continue;
+    const groupItems = idxs.map((i) => items[i]);
+    output.push(mergeIncomingItems(groupItems));
+    idxs.forEach((i) => grouped.add(i));
+  }
+
+  for (let i = 0; i < items.length; i++) {
+    if (grouped.has(i)) continue;
+    if (dropSet.has(i)) continue;
+    output.push(items[i]);
+  }
+
+  return output;
+}
+
+async function resolveDuplicateWithLLM({ item, candidates }) {
+  if (!Array.isArray(candidates) || candidates.length === 0) {
     return null;
   }
 
@@ -145,20 +272,11 @@ async function resolveDuplicateWithLLM({ item, candidates }) {
     candidates,
   };
 
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: DEDUPE_MODEL,
-      temperature: 0,
-      max_tokens: 500,
-      messages: [
-        {
-          role: 'system',
-          content: `You are a strict deduplication resolver for family life dashboard items.
+  const parsed = await callOpenRouterJSON({
+    model: DEDUPE_MODEL,
+    temperature: 0,
+    maxTokens: 500,
+    systemPrompt: `You are a strict deduplication resolver for family life dashboard items.
 
 Decide if NEW_ITEM is the same real-world obligation as one of CANDIDATES.
 Same means: identical event/deadline/action despite wording, screenshot frame, or formatting differences.
@@ -175,26 +293,8 @@ Rules:
 - If uncertain, choose null.
 - Never invent IDs; mergeWithId must be from candidates or null.
 - Prefer precision over recall.`,
-        },
-        {
-          role: 'user',
-          content: JSON.stringify(payload),
-        },
-      ],
-    }),
+    userPayload: payload,
   });
-
-  if (!response.ok) {
-    throw new Error(`LLM dedupe failed (${response.status})`);
-  }
-
-  const data = await response.json();
-  let content = data?.choices?.[0]?.message?.content || '{}';
-  content = content.trim();
-  if (content.startsWith('```')) {
-    content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
-  }
-  const parsed = JSON.parse(content);
 
   const mergeWithId = parsed?.mergeWithId || null;
   const confidence = Number(parsed?.confidence || 0);
@@ -268,11 +368,22 @@ router.post('/', requireAuth, async (req, res) => {
       return res.status(400).json({ error: 'items array is required' });
     }
 
+    let incomingItems = items;
+    try {
+      // Always involve LLM for each ingestion batch to check/sort/dedupe input.
+      incomingItems = await llmGroupIncomingItems(items);
+    } catch (err) {
+      console.warn('LLM batch ingest grouping skipped:', err.message);
+    }
+
     const userId = req.user.userId;
     const inserted = [];
     const dedupedWithinBatch = new Set();
     const llmResolutionCache = new Map();
-    const sourceHashes = [...new Set(items.map((i) => i.source_hash).filter(Boolean))];
+    const sourceHashes = [...new Set(incomingItems.flatMap((i) => {
+      if (Array.isArray(i.source_hashes)) return i.source_hashes.filter(Boolean);
+      return i.source_hash ? [i.source_hash] : [];
+    }))];
 
     // Re-analysis behavior: source is authoritative for that screenshot.
     // Remove old references from each source hash before inserting fresh results.
@@ -280,7 +391,7 @@ router.post('/', requireAuth, async (req, res) => {
       await detachSourceFromExistingItems(userId, sourceHash);
     }
 
-    for (const item of items) {
+    for (const item of incomingItems) {
       if (!isLikelyRelevant(item)) continue;
 
       const normalizedTitle = normalizeTitle(item.title);
@@ -300,7 +411,7 @@ router.post('/', requireAuth, async (req, res) => {
         [userId, canonicalKey]
       );
 
-      // Fallback dedupe: same event/task title + normalized date/time, even if
+      // Fallback deterministic dedupe: same event/task title + normalized date/time, even if
       // one extraction missed location or formatted date/time differently.
       if (existing.rows.length === 0) {
         const candidates = await pool.query(
@@ -330,9 +441,9 @@ router.post('/', requireAuth, async (req, res) => {
         }
       }
 
-      // LLM-assisted entity resolution when deterministic checks miss.
-      if (existing.rows.length === 0) {
-        const resolutionKey = `${item.type || 'info'}|${normalizedTitle}|${normalizeDateKey(item.date || '')}|${normalizeTimeKey(item.time || '')}`;
+      // LLM-assisted entity resolution for every item against nearby candidates.
+      {
+        const resolutionKey = `${item.type || 'info'}|${normalizedTitle}|${normalizeDateKey(item.date || '')}|${normalizeTimeKey(item.time || '')}|${compact(item.location || '')}`;
 
         let mergeIdFromLLM = llmResolutionCache.get(resolutionKey) || null;
         if (mergeIdFromLLM === undefined) mergeIdFromLLM = null;
@@ -360,11 +471,20 @@ router.post('/', requireAuth, async (req, res) => {
             ]
           );
 
-          if (candidateRows.rows.length > 0) {
+          const candidateRowsSorted = candidateRows.rows;
+          if (existing.rows.length > 0) {
+            // Seed deterministic match first so LLM can override/confirm.
+            const existingId = existing.rows[0].id;
+            if (!candidateRowsSorted.some((r) => r.id === existingId)) {
+              candidateRowsSorted.unshift(existing.rows[0]);
+            }
+          }
+
+          if (candidateRowsSorted.length > 0) {
             try {
               const llmDecision = await resolveDuplicateWithLLM({
                 item,
-                candidates: candidateRows.rows.map(toCandidateForLLM),
+                candidates: candidateRowsSorted.map(toCandidateForLLM),
               });
               mergeIdFromLLM = llmDecision?.mergeWithId || null;
               llmResolutionCache.set(resolutionKey, mergeIdFromLLM);
@@ -441,7 +561,9 @@ router.post('/', requireAuth, async (req, res) => {
         continue;
       }
 
-      const sourceHashesForInsert = item.source_hash ? [item.source_hash] : [];
+      const sourceHashesForInsert = Array.isArray(item.source_hashes)
+        ? [...new Set(item.source_hashes.filter(Boolean))]
+        : (item.source_hash ? [item.source_hash] : []);
       const result = await pool.query(
         `INSERT INTO items (
            user_id, type, title, normalized_title, canonical_key, date, time, end_time, location,
@@ -475,7 +597,7 @@ router.post('/', requireAuth, async (req, res) => {
     res.json({
       inserted: inserted.length,
       items: inserted,
-      processed: items.length,
+      processed: incomingItems.length,
       sourcesReconciled: sourceHashes.length,
     });
   } catch (err) {
