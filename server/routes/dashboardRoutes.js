@@ -46,19 +46,66 @@ function normalizeTime(value) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
+function timeToMinutes(value) {
+  const normalized = normalizeTime(value);
+  if (!normalized) return null;
+  const m = normalized.match(/^(\d{2}):(\d{2})$/);
+  if (!m) return null;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function itemRichnessScore(item) {
+  let score = 0;
+  if (item.description) score += Math.min(String(item.description).length, 120) / 40;
+  if (item.location) score += 1;
+  if (item.time) score += 1;
+  if (item.end_time || item.endTime) score += 1;
+  if (item.raw_text || item.rawText) score += 0.5;
+  score += Math.min(Number(item.occurrence_count || item.occurrenceCount || 1), 5) * 0.4;
+  return score;
+}
+
+function chooseRepresentative(a, b) {
+  return itemRichnessScore(a) >= itemRichnessScore(b) ? a : b;
+}
+
+function sameObligationLikely(a, b) {
+  const typeA = a.type || 'info';
+  const typeB = b.type || 'info';
+  if (typeA !== typeB) return false;
+
+  const titleA = normalizeTitle(a.title || '');
+  const titleB = normalizeTitle(b.title || '');
+  if (!titleA || !titleB || titleA !== titleB) return false;
+
+  const dateA = normalizeDate(a.date || '');
+  const dateB = normalizeDate(b.date || '');
+  if (dateA && dateB && dateA !== dateB) return false;
+
+  if (typeA === 'event' || typeA === 'deadline') {
+    const tA = timeToMinutes(a.time || '');
+    const tB = timeToMinutes(b.time || '');
+    if (tA == null || tB == null) return true; // if one missing, still likely same event
+    return Math.abs(tA - tB) <= 20; // tolerate small OCR/extraction drift
+  }
+
+  // action/info: exact normalized title (+ optional date match) is enough
+  return true;
+}
+
 function deterministicFeedDedupe(items) {
-  const seen = new Set();
   const deduped = [];
   for (const item of items) {
-    const key = [
-      item.type || 'info',
-      normalizeTitle(item.title || ''),
-      normalizeDate(item.date || ''),
-      normalizeTime(item.time || ''),
-    ].join('|');
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(item);
+    let merged = false;
+    for (let i = 0; i < deduped.length; i++) {
+      const existing = deduped[i];
+      if (sameObligationLikely(existing, item)) {
+        deduped[i] = chooseRepresentative(existing, item);
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) deduped.push(item);
   }
   return deduped;
 }
