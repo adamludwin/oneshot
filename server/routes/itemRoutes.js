@@ -5,6 +5,8 @@ import pool from '../db.js';
 const router = Router();
 
 const URGENCY_ORDER = { low: 0, medium: 1, high: 2 };
+const DEDUPE_MODEL = 'anthropic/claude-opus-4.6';
+const DEDUPE_CONFIDENCE_THRESHOLD = 0.72;
 
 function normalizeText(value) {
   if (!value) return '';
@@ -104,6 +106,106 @@ function isLikelyRelevant(item) {
   return hasTimeSignal && actionSignals.test(`${normalizeText(item.title)} ${desc}`);
 }
 
+function toCandidateForLLM(row) {
+  return {
+    id: row.id,
+    type: row.type,
+    title: row.title,
+    date: row.date,
+    time: row.time,
+    endTime: row.end_time,
+    location: row.location,
+    description: row.description,
+    category: row.category,
+    urgency: row.urgency,
+    occurrenceCount: row.occurrence_count || 1,
+    lastSeenAt: row.last_seen_at,
+  };
+}
+
+async function resolveDuplicateWithLLM({ item, candidates }) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey || !Array.isArray(candidates) || candidates.length === 0) {
+    return null;
+  }
+
+  const payload = {
+    newItem: {
+      type: item.type || 'info',
+      title: item.title || '',
+      date: item.date || null,
+      time: item.time || null,
+      endTime: item.endTime || null,
+      location: item.location || null,
+      description: item.description || null,
+      category: item.category || 'other',
+      urgency: item.urgency || 'medium',
+      people: item.people || [],
+    },
+    candidates,
+  };
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: DEDUPE_MODEL,
+      temperature: 0,
+      max_tokens: 500,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a strict deduplication resolver for family life dashboard items.
+
+Decide if NEW_ITEM is the same real-world obligation as one of CANDIDATES.
+Same means: identical event/deadline/action despite wording, screenshot frame, or formatting differences.
+Not same means: different occurrence/day/time/person/activity.
+
+Return ONLY JSON:
+{
+  "mergeWithId": "<candidate id>" | null,
+  "confidence": 0.0-1.0,
+  "reason": "short reason"
+}
+
+Rules:
+- If uncertain, choose null.
+- Never invent IDs; mergeWithId must be from candidates or null.
+- Prefer precision over recall.`,
+        },
+        {
+          role: 'user',
+          content: JSON.stringify(payload),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`LLM dedupe failed (${response.status})`);
+  }
+
+  const data = await response.json();
+  let content = data?.choices?.[0]?.message?.content || '{}';
+  content = content.trim();
+  if (content.startsWith('```')) {
+    content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  }
+  const parsed = JSON.parse(content);
+
+  const mergeWithId = parsed?.mergeWithId || null;
+  const confidence = Number(parsed?.confidence || 0);
+
+  if (!mergeWithId) return null;
+  if (!Number.isFinite(confidence) || confidence < DEDUPE_CONFIDENCE_THRESHOLD) return null;
+  if (!candidates.some((c) => c.id === mergeWithId)) return null;
+
+  return { mergeWithId, confidence };
+}
+
 async function detachSourceFromExistingItems(userId, sourceHash) {
   const existing = await pool.query(
     `SELECT id, source_hashes
@@ -169,6 +271,7 @@ router.post('/', requireAuth, async (req, res) => {
     const userId = req.user.userId;
     const inserted = [];
     const dedupedWithinBatch = new Set();
+    const llmResolutionCache = new Map();
     const sourceHashes = [...new Set(items.map((i) => i.source_hash).filter(Boolean))];
 
     // Re-analysis behavior: source is authoritative for that screenshot.
@@ -224,6 +327,70 @@ router.post('/', requireAuth, async (req, res) => {
 
         if (matched) {
           existing = { rows: [matched] };
+        }
+      }
+
+      // LLM-assisted entity resolution when deterministic checks miss.
+      if (existing.rows.length === 0) {
+        const resolutionKey = `${item.type || 'info'}|${normalizedTitle}|${normalizeDateKey(item.date || '')}|${normalizeTimeKey(item.time || '')}`;
+
+        let mergeIdFromLLM = llmResolutionCache.get(resolutionKey) || null;
+        if (mergeIdFromLLM === undefined) mergeIdFromLLM = null;
+
+        if (!mergeIdFromLLM && !llmResolutionCache.has(resolutionKey)) {
+          const candidateRows = await pool.query(
+            `SELECT *
+             FROM items
+             WHERE user_id = $1
+               AND dismissed = FALSE
+               AND type = $2
+               AND (
+                 normalized_title = $3
+                 OR date = $4
+                 OR time = $5
+               )
+             ORDER BY occurrence_count DESC, last_seen_at DESC
+             LIMIT 30`,
+            [
+              userId,
+              item.type || 'info',
+              normalizedTitle || null,
+              item.date || null,
+              item.time || null,
+            ]
+          );
+
+          if (candidateRows.rows.length > 0) {
+            try {
+              const llmDecision = await resolveDuplicateWithLLM({
+                item,
+                candidates: candidateRows.rows.map(toCandidateForLLM),
+              });
+              mergeIdFromLLM = llmDecision?.mergeWithId || null;
+              llmResolutionCache.set(resolutionKey, mergeIdFromLLM);
+            } catch (err) {
+              // Keep ingestion resilient if LLM call fails.
+              console.warn('LLM dedupe skipped:', err.message);
+              llmResolutionCache.set(resolutionKey, null);
+            }
+          } else {
+            llmResolutionCache.set(resolutionKey, null);
+          }
+        }
+
+        if (mergeIdFromLLM) {
+          const matchedById = await pool.query(
+            `SELECT *
+             FROM items
+             WHERE id = $1
+               AND user_id = $2
+               AND dismissed = FALSE
+             LIMIT 1`,
+            [mergeIdFromLLM, userId]
+          );
+          if (matchedById.rows.length > 0) {
+            existing = { rows: [matchedById.rows[0]] };
+          }
         }
       }
 
