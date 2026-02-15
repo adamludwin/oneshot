@@ -30,6 +30,20 @@ function startOfToday() {
   return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 
+function startOfTomorrow() {
+  const t = startOfToday();
+  t.setDate(t.getDate() + 1);
+  return t;
+}
+
+function isSameDay(a, b) {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
 function isPastEvent(item) {
   if (item?.type !== 'event') return false;
   const d = parseItemDate(item);
@@ -54,11 +68,50 @@ function dedupeById(items) {
   });
 }
 
+function isTodayItem(item) {
+  const d = parseItemDate(item);
+  if (!d) return false;
+  return isSameDay(d, startOfToday());
+}
+
+function isTomorrowItem(item) {
+  const d = parseItemDate(item);
+  if (!d) return false;
+  return isSameDay(d, startOfTomorrow());
+}
+
+function isFutureItem(item) {
+  const d = parseItemDate(item);
+  if (!d) return false;
+  return d > startOfTomorrow();
+}
+
+function classifyDefaultSection(item) {
+  if (isPastEvent(item)) return null;
+  if (isTodayItem(item)) return 'Today';
+  if (isTomorrowItem(item)) return 'Tomorrow';
+  if (isFutureItem(item) && (item.type === 'event' || item.type === 'deadline')) return 'Coming Up';
+  if (item.type === 'action') return 'To-dos';
+  if (item.type === 'deadline' && isOverdueDeadline(item)) return 'To-dos';
+  if (item.type === 'deadline') return 'Coming Up';
+  return 'Other';
+}
+
+function mapSectionTitle(title) {
+  const t = String(title || '').toLowerCase();
+  if (t.includes('today')) return 'Today';
+  if (t.includes('tomorrow')) return 'Tomorrow';
+  if (t.includes('coming up') || t.includes('upcoming') || t.includes('this week')) return 'Coming Up';
+  if (t.includes('to-do') || t.includes('todo') || t.includes('task') || t.includes('action')) return 'To-dos';
+  if (t.includes('other') || t.includes('reference') || t.includes('info')) return 'Other';
+  return null;
+}
+
 function buildAlertsFromSections(sections, limit = 6) {
-  const alertItems = sections
-    .filter((s) => s.title.toLowerCase().includes('needs attention'))
-    .flatMap((s) => s.items)
-    .filter(Boolean);
+  const today = sections.find((s) => s.title === 'Today')?.items || [];
+  const tomorrow = sections.find((s) => s.title === 'Tomorrow')?.items || [];
+  const todos = sections.find((s) => s.title === 'To-dos')?.items || [];
+  const alertItems = [...today, ...tomorrow, ...todos.filter((i) => i.urgency === 'high')];
 
   const seen = new Set();
   const alerts = [];
@@ -77,43 +130,44 @@ function buildAlertsFromSections(sections, limit = 6) {
 }
 
 function normalizeDashboardSections(sections, allItems) {
-  const normalized = [];
-  const overdueDeadlines = allItems.filter(isOverdueDeadline);
-  let hasNeedsAttention = false;
+  const order = ['Today', 'Tomorrow', 'Coming Up', 'To-dos', 'Other'];
+  const buckets = new Map(order.map((key) => [key, []]));
+  const seen = new Set();
 
   for (const section of sections) {
     if (!section?.title || !Array.isArray(section.items)) continue;
-    const title = section.title;
-    const lowerTitle = title.toLowerCase();
-    let items = section.items.filter(Boolean);
+    const mappedTitle = mapSectionTitle(section.title) || 'Other';
+    for (const item of section.items.filter(Boolean)) {
+      const id = item.id || `${item.title}|${item.date || ''}|${item.time || ''}`;
+      if (seen.has(id)) continue;
+      if (isPastEvent(item)) continue;
 
-    // Never show completed-time-window events as upcoming actionable items.
-    items = items.filter((item) => !isPastEvent(item));
+      let target = mappedTitle;
+      if (mappedTitle === 'Today' && !isTodayItem(item)) target = classifyDefaultSection(item) || 'Other';
+      if (mappedTitle === 'Tomorrow' && !isTomorrowItem(item)) target = classifyDefaultSection(item) || 'Other';
+      if (mappedTitle === 'Coming Up' && (isTodayItem(item) || isTomorrowItem(item) || isOverdueDeadline(item))) {
+        target = classifyDefaultSection(item) || 'Other';
+      }
+      if (target === 'Coming Up' && isOverdueDeadline(item)) target = 'To-dos';
 
-    if (lowerTitle.includes('coming up')) {
-      // Keep upcoming genuinely upcoming.
-      items = items.filter((item) => !isOverdueDeadline(item));
-    }
-
-    if (lowerTitle.includes('needs attention')) {
-      hasNeedsAttention = true;
-      items = dedupeById([...items, ...overdueDeadlines]);
-    }
-
-    if (items.length > 0) {
-      normalized.push({ title, items });
+      seen.add(id);
+      buckets.get(target)?.push(item);
     }
   }
 
-  // If model omitted "Needs Attention", add it when overdue deadlines exist.
-  if (!hasNeedsAttention && overdueDeadlines.length > 0) {
-    normalized.unshift({
-      title: 'Needs Attention',
-      items: dedupeById(overdueDeadlines),
-    });
+  // Ensure items omitted by model still appear in a reasonable section.
+  for (const item of allItems) {
+    const id = item.id || `${item.title}|${item.date || ''}|${item.time || ''}`;
+    if (seen.has(id) || isPastEvent(item)) continue;
+    const target = classifyDefaultSection(item);
+    if (!target) continue;
+    buckets.get(target)?.push(item);
+    seen.add(id);
   }
 
-  return normalized;
+  return order
+    .map((title) => ({ title, items: dedupeById(buckets.get(title) || []) }))
+    .filter((section) => section.items.length > 0);
 }
 
 function fallbackDashboard(items) {
@@ -128,22 +182,28 @@ function fallbackDashboard(items) {
 
   const sections = [
     {
-      title: 'Needs Attention',
-      items: sorted.filter((i) => i.urgency === 'high').slice(0, 8),
+      title: 'Today',
+      items: sorted.filter((i) => isTodayItem(i) && !isPastEvent(i)).slice(0, 10),
+    },
+    {
+      title: 'Tomorrow',
+      items: sorted
+        .filter((i) => isTomorrowItem(i) && !isPastEvent(i))
+        .slice(0, 10),
     },
     {
       title: 'Coming Up',
       items: sorted
-        .filter((i) => i.urgency !== 'high' && (i.type === 'event' || i.type === 'deadline'))
+        .filter((i) => isFutureItem(i) && (i.type === 'event' || i.type === 'deadline'))
         .filter((i) => !isPastEvent(i) && !isOverdueDeadline(i))
         .slice(0, 12),
     },
     {
-      title: 'To-Do',
-      items: sorted.filter((i) => i.type === 'action').slice(0, 10),
+      title: 'To-dos',
+      items: sorted.filter((i) => i.type === 'action' || isOverdueDeadline(i)).slice(0, 10),
     },
     {
-      title: 'Reference',
+      title: 'Other',
       items: sorted.filter((i) => i.type === 'info').slice(0, 10),
     },
   ].filter((s) => s.items.length > 0);
@@ -151,7 +211,7 @@ function fallbackDashboard(items) {
   const alerts = buildAlertsFromSections(normalizedSections, 5);
 
   const summary = alerts.length > 0
-    ? `You have ${alerts.length} high-priority item${alerts.length > 1 ? 's' : ''} needing attention.`
+    ? `You have ${alerts.length} key item${alerts.length > 1 ? 's' : ''} to keep in mind today/tomorrow.`
     : `You have ${sorted.length} active item${sorted.length > 1 ? 's' : ''} across your current commitments.`;
 
   return { summary, alerts, sections: normalizedSections };
@@ -199,15 +259,21 @@ Return ONLY JSON with this exact shape:
   "summary": "1-2 sentence high signal summary",
   "alerts": [{ "text": "...", "urgency": "high" | "medium" }],
   "sections": [
-    { "title": "Needs Attention", "itemIds": ["id1", "id2"] },
+    { "title": "Today", "itemIds": ["id1", "id2"] },
+    { "title": "Tomorrow", "itemIds": ["id3"] },
     { "title": "Coming Up", "itemIds": ["id3"] },
-    { "title": "To-Do", "itemIds": ["id4"] },
-    { "title": "Reference", "itemIds": ["id5"] }
+    { "title": "To-dos", "itemIds": ["id4"] },
+    { "title": "Other", "itemIds": ["id5"] }
   ]
 }
 
 Rules:
-- Prioritize high urgency and near-term deadlines/events.
+- Prioritize near-term deadlines/events, but DO NOT create a generic "Needs Attention" bucket.
+- Put items in these sections only: Today, Tomorrow, Coming Up, To-dos, Other.
+- "Today" = dated for today. "Tomorrow" = dated for tomorrow.
+- "Coming Up" = future after tomorrow.
+- "To-dos" = action items / follow-ups / overdue deadlines.
+- "Other" = likely important but unclear how to classify.
 - Keep it concise and practical.
 - Only include IDs that exist in the provided list.
 - Do not invent items.
