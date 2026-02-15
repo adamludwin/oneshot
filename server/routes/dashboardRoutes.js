@@ -4,6 +4,96 @@ import pool from '../db.js';
 
 const router = Router();
 
+function parseItemDate(item) {
+  const raw = item?.date;
+  if (!raw) return null;
+
+  const direct = new Date(raw);
+  if (!Number.isNaN(direct.getTime())) return direct;
+
+  const mdy = String(raw).match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/);
+  if (mdy) {
+    const month = Number(mdy[1]) - 1;
+    const day = Number(mdy[2]);
+    let year = Number(mdy[3]);
+    if (!year) year = new Date().getFullYear();
+    if (year < 100) year += 2000;
+    const d = new Date(year, month, day);
+    if (!Number.isNaN(d.getTime())) return d;
+  }
+
+  return null;
+}
+
+function startOfToday() {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+function isPastEvent(item) {
+  if (item?.type !== 'event') return false;
+  const d = parseItemDate(item);
+  if (!d) return false;
+  return d < startOfToday();
+}
+
+function isOverdueDeadline(item) {
+  if (item?.type !== 'deadline') return false;
+  const d = parseItemDate(item);
+  if (!d) return false;
+  return d < startOfToday();
+}
+
+function dedupeById(items) {
+  const seen = new Set();
+  return items.filter((item) => {
+    if (!item?.id) return true;
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
+function normalizeDashboardSections(sections, allItems) {
+  const normalized = [];
+  const overdueDeadlines = allItems.filter(isOverdueDeadline);
+  let hasNeedsAttention = false;
+
+  for (const section of sections) {
+    if (!section?.title || !Array.isArray(section.items)) continue;
+    const title = section.title;
+    const lowerTitle = title.toLowerCase();
+    let items = section.items.filter(Boolean);
+
+    // Never show completed-time-window events as upcoming actionable items.
+    items = items.filter((item) => !isPastEvent(item));
+
+    if (lowerTitle.includes('coming up')) {
+      // Keep upcoming genuinely upcoming.
+      items = items.filter((item) => !isOverdueDeadline(item));
+    }
+
+    if (lowerTitle.includes('needs attention')) {
+      hasNeedsAttention = true;
+      items = dedupeById([...items, ...overdueDeadlines]);
+    }
+
+    if (items.length > 0) {
+      normalized.push({ title, items });
+    }
+  }
+
+  // If model omitted "Needs Attention", add it when overdue deadlines exist.
+  if (!hasNeedsAttention && overdueDeadlines.length > 0) {
+    normalized.unshift({
+      title: 'Needs Attention',
+      items: dedupeById(overdueDeadlines),
+    });
+  }
+
+  return normalized;
+}
+
 function fallbackDashboard(items) {
   const sorted = [...items].sort((a, b) => {
     const urgencyRank = { high: 0, medium: 1, low: 2 };
@@ -29,7 +119,10 @@ function fallbackDashboard(items) {
     },
     {
       title: 'Coming Up',
-      items: sorted.filter((i) => i.urgency !== 'high' && (i.type === 'event' || i.type === 'deadline')).slice(0, 12),
+      items: sorted
+        .filter((i) => i.urgency !== 'high' && (i.type === 'event' || i.type === 'deadline'))
+        .filter((i) => !isPastEvent(i) && !isOverdueDeadline(i))
+        .slice(0, 12),
     },
     {
       title: 'To-Do',
@@ -40,12 +133,13 @@ function fallbackDashboard(items) {
       items: sorted.filter((i) => i.type === 'info').slice(0, 10),
     },
   ].filter((s) => s.items.length > 0);
+  const normalizedSections = normalizeDashboardSections(sections, sorted);
 
   const summary = alerts.length > 0
     ? `You have ${alerts.length} high-priority item${alerts.length > 1 ? 's' : ''} needing attention.`
     : `You have ${sorted.length} active item${sorted.length > 1 ? 's' : ''} across your current commitments.`;
 
-  return { summary, alerts, sections };
+  return { summary, alerts, sections: normalizedSections };
 }
 
 async function synthesizeDashboard(items) {
@@ -132,11 +226,12 @@ Rules:
       items: (s.itemIds || []).map((id) => byId.get(id)).filter(Boolean),
     }))
     .filter((s) => s.title && s.items.length > 0);
+  const normalizedSections = normalizeDashboardSections(sections, items);
 
   return {
     summary: parsed.summary || fallbackDashboard(items).summary,
     alerts: Array.isArray(parsed.alerts) ? parsed.alerts.slice(0, 6) : [],
-    sections: sections.length > 0 ? sections : fallbackDashboard(items).sections,
+    sections: normalizedSections.length > 0 ? normalizedSections : fallbackDashboard(items).sections,
   };
 }
 
