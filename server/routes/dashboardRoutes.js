@@ -3,6 +3,133 @@ import { requireAuth } from '../middleware/auth.js';
 import pool from '../db.js';
 
 const router = Router();
+const FEED_DEDUPE_MODEL = 'anthropic/claude-opus-4.6';
+
+function normalizeText(value) {
+  if (!value) return '';
+  return String(value)
+    .toLowerCase()
+    .trim()
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/[\u201C\u201D]/g, '"')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ');
+}
+
+function normalizeTitle(value) {
+  return normalizeText(value)
+    .replace(/\b(the|a|an)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function normalizeDate(value) {
+  if (!value) return '';
+  const d = parseItemDate({ date: value });
+  if (!d) return normalizeText(value).replace(/\s+/g, '');
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function normalizeTime(value) {
+  if (!value) return '';
+  const raw = String(value).toLowerCase().trim().replace(/\./g, '');
+  const m = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!m) return normalizeText(raw).replace(/\s+/g, '');
+  let hour = Number(m[1]);
+  const minute = Number(m[2] || '0');
+  const ampm = m[3];
+  if (ampm === 'pm' && hour < 12) hour += 12;
+  if (ampm === 'am' && hour === 12) hour = 0;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function deterministicFeedDedupe(items) {
+  const seen = new Set();
+  const deduped = [];
+  for (const item of items) {
+    const key = [
+      item.type || 'info',
+      normalizeTitle(item.title || ''),
+      normalizeDate(item.date || ''),
+      normalizeTime(item.time || ''),
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(item);
+  }
+  return deduped;
+}
+
+async function llmSelectKeepIds(items) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) return items.map((i) => i.id).filter(Boolean);
+
+  const compact = items.map((i) => ({
+    id: i.id,
+    type: i.type,
+    title: i.title,
+    date: i.date,
+    time: i.time,
+    location: i.location,
+    description: i.description,
+  }));
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: FEED_DEDUPE_MODEL,
+      temperature: 0,
+      max_tokens: 1200,
+      messages: [
+        {
+          role: 'system',
+          content: `You are a strict feed de-duplication resolver.
+
+Given dashboard items, keep only one card per real-world obligation.
+Duplicates include the same event shown with slight wording/time/location formatting changes.
+
+Return ONLY JSON:
+{
+  "keepIds": ["id1","id3"],
+  "reason": "short optional reason"
+}
+
+Rules:
+- keepIds must be subset of provided IDs.
+- Keep one best representative per duplicate cluster.
+- If unsure, keep both (prefer false negatives over false positives).
+- Do not invent IDs.`,
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({ items: compact }),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`feed dedupe LLM failed (${response.status})`);
+  }
+
+  const data = await response.json();
+  let content = data?.choices?.[0]?.message?.content || '{}';
+  content = content.trim();
+  if (content.startsWith('```')) {
+    content = content.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '');
+  }
+  const parsed = JSON.parse(content);
+  const keepIds = Array.isArray(parsed.keepIds) ? parsed.keepIds : [];
+  const valid = new Set(items.map((i) => i.id).filter(Boolean));
+  return keepIds.filter((id) => valid.has(id));
+}
 
 function parseItemDate(item) {
   const raw = item?.date;
@@ -359,7 +486,21 @@ router.get('/', requireAuth, async (req, res) => {
     );
 
     const items = result.rows;
-    const displayItems = items.filter((item) => !isPastEvent(item));
+    const nonPastItems = items.filter((item) => !isPastEvent(item));
+    const deterministicItems = deterministicFeedDedupe(nonPastItems);
+    let displayItems = deterministicItems;
+
+    // Always involve LLM on feed generation to dedupe logical duplicates.
+    try {
+      const keepIds = await llmSelectKeepIds(deterministicItems);
+      if (keepIds.length > 0) {
+        const keepSet = new Set(keepIds);
+        displayItems = deterministicItems.filter((i) => keepSet.has(i.id));
+      }
+    } catch (err) {
+      console.warn('feed LLM dedupe skipped:', err.message);
+    }
+
     if (displayItems.length === 0) {
       return res.json({
         summary: 'No items yet. Screenshot important life updates and pull to refresh.',
