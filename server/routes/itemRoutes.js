@@ -28,11 +28,59 @@ function compact(value) {
   return normalizeText(value || '').replace(/\s+/g, '');
 }
 
+function normalizeDateKey(value) {
+  if (!value) return '';
+  const raw = String(value).trim();
+
+  const direct = new Date(raw);
+  if (!Number.isNaN(direct.getTime())) {
+    const y = direct.getFullYear();
+    const m = String(direct.getMonth() + 1).padStart(2, '0');
+    const d = String(direct.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  const mdy = raw.match(/^(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?$/);
+  if (mdy) {
+    const month = String(Number(mdy[1])).padStart(2, '0');
+    const day = String(Number(mdy[2])).padStart(2, '0');
+    let year = Number(mdy[3] || new Date().getFullYear());
+    if (year < 100) year += 2000;
+    return `${year}-${month}-${day}`;
+  }
+
+  return compact(raw);
+}
+
+function normalizeTimeKey(value) {
+  if (!value) return '';
+  const raw = String(value).toLowerCase().trim().replace(/\./g, '');
+  const m = raw.match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/);
+  if (!m) return compact(raw);
+
+  let hour = Number(m[1]);
+  const minute = Number(m[2] || '0');
+  const ampm = m[3];
+
+  if (ampm === 'pm' && hour < 12) hour += 12;
+  if (ampm === 'am' && hour === 12) hour = 0;
+
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function buildLooseTemporalKey(item) {
+  const type = item.type || 'info';
+  const title = normalizeTitle(item.title || '');
+  const date = normalizeDateKey(item.date || '');
+  const time = normalizeTimeKey(item.time || '');
+  return `${type}|${title}|${date}|${time}`;
+}
+
 function buildCanonicalKey(item) {
   const type = item.type || 'info';
   const title = normalizeTitle(item.title || '');
-  const date = compact(item.date || '');
-  const time = compact(item.time || '');
+  const date = normalizeDateKey(item.date || '');
+  const time = normalizeTimeKey(item.time || '');
   const location = compact(item.location || '');
   return `${type}|${title}|${date}|${time}|${location}`;
 }
@@ -134,11 +182,12 @@ router.post('/', requireAuth, async (req, res) => {
 
       const normalizedTitle = normalizeTitle(item.title);
       const canonicalKey = buildCanonicalKey(item);
-      const dedupeKey = `${item.source_hash || 'nosource'}|${canonicalKey}`;
+      const looseTemporalKey = buildLooseTemporalKey(item);
+      const dedupeKey = `${item.source_hash || 'nosource'}|${looseTemporalKey}`;
       if (dedupedWithinBatch.has(dedupeKey)) continue;
       dedupedWithinBatch.add(dedupeKey);
 
-      const existing = await pool.query(
+      let existing = await pool.query(
         `SELECT *
          FROM items
          WHERE user_id = $1
@@ -147,6 +196,36 @@ router.post('/', requireAuth, async (req, res) => {
          LIMIT 1`,
         [userId, canonicalKey]
       );
+
+      // Fallback dedupe: same event/task title + normalized date/time, even if
+      // one extraction missed location or formatted date/time differently.
+      if (existing.rows.length === 0) {
+        const candidates = await pool.query(
+          `SELECT *
+           FROM items
+           WHERE user_id = $1
+             AND dismissed = FALSE
+             AND type = $2
+             AND normalized_title = $3
+           ORDER BY last_seen_at DESC
+           LIMIT 20`,
+          [userId, item.type || 'info', normalizedTitle || null]
+        );
+
+        const matched = candidates.rows.find((row) => {
+          const rowLooseKey = buildLooseTemporalKey({
+            type: row.type,
+            title: row.title,
+            date: row.date,
+            time: row.time,
+          });
+          return rowLooseKey === looseTemporalKey;
+        });
+
+        if (matched) {
+          existing = { rows: [matched] };
+        }
+      }
 
       if (existing.rows.length > 0) {
         const prev = existing.rows[0];

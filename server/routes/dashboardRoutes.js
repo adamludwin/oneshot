@@ -129,6 +129,27 @@ function buildAlertsFromSections(sections, limit = 6) {
   return alerts;
 }
 
+function buildSummaryFromSections(sections, totalItems) {
+  const countFor = (title) => sections.find((s) => s.title === title)?.items.length || 0;
+  const today = countFor('Today');
+  const tomorrow = countFor('Tomorrow');
+  const comingUp = countFor('Coming Up');
+  const todos = countFor('To-dos');
+
+  const parts = [];
+  if (today > 0) parts.push(`${today} item${today > 1 ? 's' : ''} today`);
+  if (tomorrow > 0) parts.push(`${tomorrow} tomorrow`);
+  if (comingUp > 0) parts.push(`${comingUp} coming up`);
+  if (todos > 0) parts.push(`${todos} to-do${todos > 1 ? 's' : ''}`);
+
+  if (parts.length === 0) {
+    return `You have ${totalItems} active item${totalItems > 1 ? 's' : ''} across your commitments.`;
+  }
+
+  return parts[0].charAt(0).toUpperCase() + parts[0].slice(1) +
+    (parts.length > 1 ? `, ${parts.slice(1).join(', ')}` : '') + '.';
+}
+
 function normalizeDashboardSections(sections, allItems) {
   const order = ['Today', 'Tomorrow', 'Coming Up', 'To-dos', 'Other'];
   const buckets = new Map(order.map((key) => [key, []]));
@@ -210,9 +231,7 @@ function fallbackDashboard(items) {
   const normalizedSections = normalizeDashboardSections(sections, sorted);
   const alerts = buildAlertsFromSections(normalizedSections, 5);
 
-  const summary = alerts.length > 0
-    ? `You have ${alerts.length} key item${alerts.length > 1 ? 's' : ''} to keep in mind today/tomorrow.`
-    : `You have ${sorted.length} active item${sorted.length > 1 ? 's' : ''} across your current commitments.`;
+  const summary = buildSummaryFromSections(normalizedSections, sorted.length);
 
   return { summary, alerts, sections: normalizedSections };
 }
@@ -313,12 +332,15 @@ Rules:
   const fallback = fallbackDashboard(items);
   const deterministicAlerts = buildAlertsFromSections(normalizedSections, 6);
 
+  const resolvedSections = normalizedSections.length > 0 ? normalizedSections : fallback.sections;
+
   return {
-    summary: parsed.summary || fallbackDashboard(items).summary,
+    // Always derive summary from normalized sections to avoid "today/tomorrow" drift.
+    summary: buildSummaryFromSections(resolvedSections, items.length),
     // Prefer deterministic alerts from normalized sections so stale past events
     // cannot appear in top banners even if model text mentions them.
     alerts: deterministicAlerts.length > 0 ? deterministicAlerts : modelAlerts,
-    sections: normalizedSections.length > 0 ? normalizedSections : fallback.sections,
+    sections: resolvedSections,
   };
 }
 
